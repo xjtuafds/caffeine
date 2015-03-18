@@ -48,8 +48,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.logging.Level;
@@ -62,6 +60,8 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import com.github.benmanes.caffeine.base.UnsafeAccess;
 import com.github.benmanes.caffeine.cache.References.InternalReference;
+import com.github.benmanes.caffeine.cache.Relaxed.RelaxedLong;
+import com.github.benmanes.caffeine.cache.Relaxed.RelaxedReference;
 import com.github.benmanes.caffeine.cache.stats.DisabledStatsCounter;
 import com.github.benmanes.caffeine.cache.stats.StatsCounter;
 import com.github.benmanes.caffeine.cache.tracing.Tracer;
@@ -383,15 +383,15 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
     throw new UnsupportedOperationException();
   }
 
-  protected AtomicLong[] readBufferWriteCount() {
+  protected RelaxedLong[] readBufferWriteCount() {
     throw new UnsupportedOperationException();
   }
 
-  protected AtomicLong[] readBufferDrainAtWriteCount() {
+  protected RelaxedLong[] readBufferDrainAtWriteCount() {
     throw new UnsupportedOperationException();
   }
 
-  protected AtomicReference<Node<K, V>>[][] readBuffers() {
+  protected RelaxedReference<Node<K, V>>[][] readBuffers() {
     throw new UnsupportedOperationException();
   }
 
@@ -546,8 +546,8 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
     // The location in the buffer is chosen in a racy fashion as the increment is not atomic with
     // the insertion. This means that concurrent reads can overlap and overwrite one another,
     // resulting in a lossy buffer.
-    final AtomicLong counter = readBufferWriteCount()[bufferIndex];
-    final long writeCount = counter.get();
+    final RelaxedLong counter = readBufferWriteCount()[bufferIndex];
+    final long writeCount = counter.lazyGet();
     counter.lazySet(writeCount + 1);
 
     final int index = (int) (writeCount & READ_BUFFER_INDEX_MASK);
@@ -563,7 +563,7 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
    * @param writeCount the number of writes on the chosen read buffer
    */
   void drainOnReadIfNeeded(int bufferIndex, long writeCount) {
-    final long pending = (writeCount - readBufferDrainAtWriteCount()[bufferIndex].get());
+    final long pending = (writeCount - readBufferDrainAtWriteCount()[bufferIndex].lazyGet());
     final boolean delayable = (pending < READ_BUFFER_THRESHOLD);
     final DrainStatus status = drainStatus();
     if (status.shouldDrainBuffers(delayable)) {
@@ -663,12 +663,11 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
   /** Drains the read buffer up to an amortized threshold. */
   @GuardedBy("evictionLock")
   void drainReadBuffer(int bufferIndex) {
-    final long writeCount = readBufferWriteCount()[bufferIndex].get();
+    final long writeCount = readBufferWriteCount()[bufferIndex].lazyGet();
     for (int i = 0; i < READ_BUFFER_DRAIN_THRESHOLD; i++) {
-      final int index =
-          (int) (readBufferReadCount()[bufferIndex] & READ_BUFFER_INDEX_MASK);
-      final AtomicReference<Node<K, V>> slot = readBuffers()[bufferIndex][index];
-      final Node<K, V> node = slot.get();
+      final int index = (int) (readBufferReadCount()[bufferIndex] & READ_BUFFER_INDEX_MASK);
+      final RelaxedReference<Node<K, V>> slot = readBuffers()[bufferIndex][index];
+      final Node<K, V> node = slot.lazyGet();
       if (node == null) {
         break;
       }
@@ -854,8 +853,8 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
         }
 
         // Discard all pending reads
-        for (AtomicReference<Node<K, V>>[] buffer : readBuffers()) {
-          for (AtomicReference<Node<K, V>> slot : buffer) {
+        for (RelaxedReference<Node<K, V>>[] buffer : readBuffers()) {
+          for (RelaxedReference<Node<K, V>> slot : buffer) {
             slot.lazySet(null);
           }
         }

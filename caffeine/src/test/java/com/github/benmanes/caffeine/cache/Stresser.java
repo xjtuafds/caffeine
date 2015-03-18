@@ -94,7 +94,7 @@ public final class Stresser {
         long reads = 0;
         for (int i = 0; i < local.readBuffers().length; i++) {
           for (int j = 0; j < local.readBuffers()[i].length; j++) {
-            if (local.readBuffers()[i][j].get() != null) {
+            if (local.readBuffers()[i][j].lazyGet() != null) {
               reads++;
             }
           }

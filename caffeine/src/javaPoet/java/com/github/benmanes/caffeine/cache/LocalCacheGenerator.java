@@ -20,6 +20,8 @@ import static com.github.benmanes.caffeine.cache.Specifications.BUILDER_PARAM;
 import static com.github.benmanes.caffeine.cache.Specifications.CACHE_LOADER;
 import static com.github.benmanes.caffeine.cache.Specifications.CACHE_LOADER_PARAM;
 import static com.github.benmanes.caffeine.cache.Specifications.NODE;
+import static com.github.benmanes.caffeine.cache.Specifications.RELAXED_LONG;
+import static com.github.benmanes.caffeine.cache.Specifications.RELAXED_REF;
 import static com.github.benmanes.caffeine.cache.Specifications.REMOVAL_LISTENER;
 import static com.github.benmanes.caffeine.cache.Specifications.STATS_COUNTER;
 import static com.github.benmanes.caffeine.cache.Specifications.TICKER;
@@ -36,14 +38,10 @@ import static com.github.benmanes.caffeine.cache.Specifications.vTypeVar;
 
 import java.util.Set;
 import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 
 import javax.lang.model.element.Modifier;
 
-import com.squareup.javapoet.AnnotationSpec;
 import com.squareup.javapoet.ArrayTypeName;
-import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.CodeBlock;
 import com.squareup.javapoet.FieldSpec;
 import com.squareup.javapoet.MethodSpec;
@@ -393,6 +391,32 @@ public final class LocalCacheGenerator {
     initializeReadBufferArrays();
   }
 
+  private void addReadBuffersField() {
+    TypeName readBuffers = ArrayTypeName.of(ArrayTypeName.of(
+        ParameterizedTypeName.get(RELAXED_REF, NODE)));
+    constructor.addStatement("this.readBuffers = new $T[NUMBER_OF_READ_BUFFERS][READ_BUFFER_SIZE]",
+        RELAXED_REF);
+    cache.addField(FieldSpec.builder(readBuffers,
+        "readBuffers", privateFinalModifiers).build());
+    cache.addMethod(MethodSpec.methodBuilder("readBuffers")
+        .addStatement("return readBuffers")
+        .addModifiers(protectedFinalModifiers)
+        .returns(readBuffers)
+        .build());
+  }
+
+  private void addReadBufferWriteCount() {
+    constructor.addStatement(
+        "this.readBufferWriteCount = new $T[NUMBER_OF_READ_BUFFERS]", RELAXED_LONG);
+    cache.addField(FieldSpec.builder(ArrayTypeName.of(RELAXED_LONG),
+        "readBufferWriteCount", privateFinalModifiers).build());
+    cache.addMethod(MethodSpec.methodBuilder("readBufferWriteCount")
+        .addStatement("return readBufferWriteCount")
+        .returns(ArrayTypeName.of(RELAXED_LONG))
+        .addModifiers(protectedFinalModifiers)
+        .build());
+  }
+
   private void addReadBufferReadCountField() {
     constructor.addStatement("this.readBufferReadCount = new long[NUMBER_OF_READ_BUFFERS]");
     cache.addField(FieldSpec.builder(long[].class,
@@ -404,55 +428,28 @@ public final class LocalCacheGenerator {
         .build());
   }
 
-  private void initializeReadBufferArrays() {
-    constructor.addCode(CodeBlock.builder()
-        .beginControlFlow("for (int i = 0; i < NUMBER_OF_READ_BUFFERS; i++)")
-            .addStatement("readBufferWriteCount[i] = new AtomicLong()")
-            .addStatement("readBufferDrainAtWriteCount[i] = new AtomicLong()")
-            .addStatement("readBuffers[i] = new AtomicReference[READ_BUFFER_SIZE]")
-            .beginControlFlow("for (int j = 0; j < READ_BUFFER_SIZE; j++)")
-                .addStatement("readBuffers[i][j] = new $T<$T>()", AtomicReference.class, NODE)
-            .endControlFlow()
-        .endControlFlow().build());
-  }
-
-  private void addReadBufferWriteCount() {
-    constructor.addStatement("this.readBufferWriteCount = new AtomicLong[NUMBER_OF_READ_BUFFERS]");
-    cache.addField(FieldSpec.builder(AtomicLong[].class,
-        "readBufferWriteCount", privateFinalModifiers).build());
-    cache.addMethod(MethodSpec.methodBuilder("readBufferWriteCount")
-        .addStatement("return readBufferWriteCount")
-        .addModifiers(protectedFinalModifiers)
-        .returns(AtomicLong[].class)
-        .build());
-  }
-
   private void addReadBufferDrainAtWriteCountField() {
     constructor.addStatement(
-        "this.readBufferDrainAtWriteCount = new AtomicLong[NUMBER_OF_READ_BUFFERS]");
-    cache.addField(FieldSpec.builder(AtomicLong[].class,
+        "this.readBufferDrainAtWriteCount = new $T[NUMBER_OF_READ_BUFFERS]", RELAXED_LONG);
+    cache.addField(FieldSpec.builder(ArrayTypeName.of(RELAXED_LONG),
         "readBufferDrainAtWriteCount", privateFinalModifiers).build());
     cache.addMethod(MethodSpec.methodBuilder("readBufferDrainAtWriteCount")
         .addStatement("return readBufferDrainAtWriteCount")
+        .returns(ArrayTypeName.of(RELAXED_LONG))
         .addModifiers(protectedFinalModifiers)
-        .returns(AtomicLong[].class)
         .build());
   }
 
-  private void addReadBuffersField() {
-    TypeName readBuffers = ArrayTypeName.of(ArrayTypeName.of(
-        ParameterizedTypeName.get(ClassName.get(AtomicReference.class), NODE)));
-    constructor.addStatement("this.readBuffers = new $T[NUMBER_OF_READ_BUFFERS][READ_BUFFER_SIZE]",
-        AtomicReference.class);
-    cache.addField(FieldSpec.builder(readBuffers,
-        "readBuffers", privateFinalModifiers).build());
-    cache.addMethod(MethodSpec.methodBuilder("readBuffers")
-        .addStatement("return readBuffers")
-        .addModifiers(protectedFinalModifiers)
-        .returns(readBuffers)
-        .build());
-    constructor.addAnnotation(AnnotationSpec.builder(SuppressWarnings.class)
-        .addMember("value", "{$S, $S}", "unchecked", "cast").build());
+  private void initializeReadBufferArrays() {
+    constructor.addCode(CodeBlock.builder()
+        .beginControlFlow("for (int i = 0; i < NUMBER_OF_READ_BUFFERS; i++)")
+            .addStatement("readBufferWriteCount[i] = new $T()", RELAXED_LONG)
+            .addStatement("readBufferDrainAtWriteCount[i] = new $T()", RELAXED_LONG)
+            .addStatement("readBuffers[i] = new $T[READ_BUFFER_SIZE]", RELAXED_REF)
+            .beginControlFlow("for (int j = 0; j < READ_BUFFER_SIZE; j++)")
+                .addStatement("readBuffers[i][j] = new $T<$T>()", RELAXED_REF, NODE)
+            .endControlFlow()
+        .endControlFlow().build());
   }
 
   /** Adds the reference strength methods for the key or value. */

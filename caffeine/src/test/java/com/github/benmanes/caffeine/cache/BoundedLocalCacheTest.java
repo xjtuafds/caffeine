@@ -32,8 +32,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 
 import org.testng.annotations.Listeners;
 import org.testng.annotations.Test;
@@ -42,6 +40,8 @@ import com.github.benmanes.caffeine.Awaits;
 import com.github.benmanes.caffeine.ConcurrentTestHarness;
 import com.github.benmanes.caffeine.cache.BoundedLocalCache.DrainStatus;
 import com.github.benmanes.caffeine.cache.Policy.Eviction;
+import com.github.benmanes.caffeine.cache.Relaxed.RelaxedLong;
+import com.github.benmanes.caffeine.cache.Relaxed.RelaxedReference;
 import com.github.benmanes.caffeine.cache.testing.CacheContext;
 import com.github.benmanes.caffeine.cache.testing.CacheProvider;
 import com.github.benmanes.caffeine.cache.testing.CacheSpec;
@@ -207,16 +207,16 @@ public final class BoundedLocalCacheTest {
   public void updateRecency_onGetQuietly(Cache<Integer, Integer> cache) {
     BoundedLocalCache<Integer, Integer> localCache = asBoundedLocalCache(cache);
     int index = BoundedLocalCache.readBufferIndex();
-    AtomicLong drainCounter = localCache.readBufferDrainAtWriteCount()[index];
+    RelaxedLong drainCounter = localCache.readBufferDrainAtWriteCount()[index];
 
     Node<Integer, Integer> first = localCache.accessOrderDeque().peek();
     Node<Integer, Integer> last = localCache.accessOrderDeque().peekLast();
-    long drained = drainCounter.get();
+    long drained = drainCounter.lazyGet();
     localCache.drainBuffers();
 
     assertThat(localCache.accessOrderDeque().peekFirst(), is(first));
     assertThat(localCache.accessOrderDeque().peekLast(), is(last));
-    assertThat(drainCounter.get(), is(drained));
+    assertThat(drainCounter.lazyGet(), is(drained));
   }
 
   @Test(dataProvider = "caches")
@@ -277,15 +277,15 @@ public final class BoundedLocalCacheTest {
     Node<Integer, Integer> dummy = localCache.nodeFactory.newNode(null, null, null, 1, 0);
 
     int index = BoundedLocalCache.readBufferIndex();
-    AtomicLong drainCounter = localCache.readBufferDrainAtWriteCount()[index];
-    localCache.readBufferWriteCount()[index].set(
+    RelaxedLong drainCounter = localCache.readBufferDrainAtWriteCount()[index];
+    localCache.readBufferWriteCount()[index].lazySet(
         BoundedLocalCache.READ_BUFFER_THRESHOLD - 1);
 
     localCache.afterRead(dummy, true);
-    assertThat(drainCounter.get(), is(0L));
+    assertThat(drainCounter.lazyGet(), is(0L));
 
     localCache.afterRead(dummy, true);
-    assertThat(drainCounter.get(), is(BoundedLocalCache.READ_BUFFER_THRESHOLD + 1L));
+    assertThat(drainCounter.lazyGet(), is(BoundedLocalCache.READ_BUFFER_THRESHOLD + 1L));
   }
 
   @Test(dataProvider = "caches")
@@ -309,26 +309,26 @@ public final class BoundedLocalCacheTest {
     BoundedLocalCache<Integer, Integer> localCache = asBoundedLocalCache(cache);
 
     int index = BoundedLocalCache.readBufferIndex();
-    AtomicReference<Node<Integer, Integer>>[] buffer = localCache.readBuffers()[index];
-    AtomicLong writeCounter = localCache.readBufferWriteCount()[index];
+    RelaxedReference<Node<Integer, Integer>>[] buffer = localCache.readBuffers()[index];
+    RelaxedLong writeCounter = localCache.readBufferWriteCount()[index];
 
     for (int i = 0; i < BoundedLocalCache.READ_BUFFER_THRESHOLD; i++) {
       localCache.get(context.firstKey());
     }
 
     int pending = 0;
-    for (AtomicReference<?> slot : buffer) {
-      if (slot.get() != null) {
+    for (RelaxedReference<?> slot : buffer) {
+      if (slot.lazyGet() != null) {
         pending++;
       }
     }
     assertThat(pending, is(equalTo(BoundedLocalCache.READ_BUFFER_THRESHOLD)));
-    assertThat((int) writeCounter.get(), is(equalTo(pending)));
+    assertThat((int) writeCounter.lazyGet(), is(equalTo(pending)));
 
     localCache.get(context.firstKey());
-    assertThat(localCache.readBufferReadCount()[index], is(equalTo(writeCounter.get())));
+    assertThat(localCache.readBufferReadCount()[index], is(equalTo(writeCounter.lazyGet())));
     for (int i = 0; i < localCache.readBuffers().length; i++) {
-      assertThat(localCache.readBuffers()[index][i].get(), is(nullValue()));
+      assertThat(localCache.readBuffers()[index][i].lazyGet(), is(nullValue()));
     }
   }
 

@@ -76,7 +76,7 @@ public final class IsValidBoundedLocalCache<K, V>
 
         boolean fullyDrained = cache.buffersWrites() && cache.writeQueue().isEmpty();
         for (int j = 0; j < cache.readBuffers().length; j++) {
-          fullyDrained &= (cache.readBuffers()[i][j].get() == null);
+          fullyDrained &= (cache.readBuffers()[i][j].lazyGet() == null);
         }
         if (fullyDrained) {
           break;

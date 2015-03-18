@@ -102,6 +102,9 @@ public final class Specifications {
   static final TypeName WRITE_QUEUE = ParameterizedTypeName.get(
       ClassName.get(ConcurrentLinkedQueue.class), ClassName.get(Runnable.class));
 
+  static final ClassName RELAXED_LONG = ClassName.get(PACKAGE_NAME + ".Relaxed", "RelaxedLong");
+  static final ClassName RELAXED_REF = ClassName.get(PACKAGE_NAME + ".Relaxed", "RelaxedReference");
+
   private Specifications() {}
 
   /** Returns the offset constant to this variable. */

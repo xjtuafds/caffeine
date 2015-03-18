@@ -39,6 +39,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
+import com.squareup.javapoet.AnnotationSpec;
 import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.JavaFile;
 import com.squareup.javapoet.MethodSpec;
@@ -62,7 +63,9 @@ public final class LocalCacheFactoryGenerator {
   }
 
   void generate() throws IOException {
-    factory = TypeSpec.enumBuilder("LocalCacheFactory");
+    factory = TypeSpec.enumBuilder("LocalCacheFactory")
+        .addAnnotation(AnnotationSpec.builder(SuppressWarnings.class)
+            .addMember("value", "{$S, $S, $S}", "unchecked", "cast", "unused").build());
     addClassJavaDoc();
     generateLocalCaches();
 

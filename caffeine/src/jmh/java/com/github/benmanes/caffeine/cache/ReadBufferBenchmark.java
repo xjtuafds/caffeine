@@ -142,11 +142,11 @@ public class ReadBufferBenchmark {
   static final class OneShotBuffer implements Buffer {
     final RelaxedAtomic<Boolean>[] buffer;
     final RelaxedAtomicInt writeCounter;
-    final AtomicInteger readCounter;
+    final RelaxedAtomicInt readCounter;
 
     @SuppressWarnings("unchecked")
     OneShotBuffer() {
-      readCounter = new AtomicInteger();
+      readCounter = new RelaxedAtomicInt();
       writeCounter = new RelaxedAtomicInt();
       buffer = new RelaxedAtomic[READ_BUFFER_SIZE];
       for (int i = 0; i < READ_BUFFER_SIZE; i++) {
@@ -165,7 +165,7 @@ public class ReadBufferBenchmark {
 
     @Override
     public void drain() {
-      int readCount = readCounter.get();
+      int readCount = readCounter.getRelaxed();
       for (int i = 0; i < READ_BUFFER_SIZE; i++) {
         int index = readCount & READ_BUFFER_INDEX_MASK;
         Boolean value = buffer[index].getRelaxed();
