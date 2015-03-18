@@ -69,7 +69,7 @@ public final class IsValidBoundedLocalCache<K, V>
     if (!cache.evicts() && !cache.expiresAfterAccess()) {
       return;
     }
-    cache.evictionLock().lock();
+    cache.evictionLock.lock();
     for (int i = 0; i < cache.readBuffers().length; i++) {
       for (;;) {
         cache.drainBuffers();
@@ -84,7 +84,7 @@ public final class IsValidBoundedLocalCache<K, V>
         cache.readBufferReadCount()[i]++;
       }
     }
-    cache.evictionLock().unlock();
+    cache.evictionLock.unlock();
   }
 
   private void checkCache(BoundedLocalCache<K, V> cache, DescriptionBuilder desc) {
@@ -92,7 +92,7 @@ public final class IsValidBoundedLocalCache<K, V>
     if (cache.evicts()) {
       desc.expectThat("overflow", cache.maximum(),
           is(greaterThanOrEqualTo(cache.adjustedWeightedSize())));
-      desc.expectThat("unlocked", cache.evictionLock().isLocked(), is(false));
+      desc.expectThat("unlocked", cache.evictionLock.isLocked(), is(false));
     }
 
     if (cache.isEmpty()) {

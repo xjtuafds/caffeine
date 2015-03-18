@@ -108,7 +108,7 @@ public final class BoundedLocalCacheTest {
     Entry<Integer, Integer> newEntry = Iterables.get(context.absent().entrySet(), 1);
 
     localCache.put(oldEntry.getKey(), oldEntry.getValue());
-    localCache.evictionLock().lock();
+    localCache.evictionLock.lock();
     try {
       Object keyRef = localCache.nodeFactory.newLookupKey(oldEntry.getKey());
       Node<Integer, Integer> node = localCache.data.get(keyRef);
@@ -125,7 +125,7 @@ public final class BoundedLocalCacheTest {
       assertThat(localCache.containsKey(newEntry.getKey()), is(true));
       assertThat(cache, hasRemovalNotifications(context, 1, RemovalCause.EXPLICIT));
     } finally {
-      localCache.evictionLock().unlock();
+      localCache.evictionLock.unlock();
     }
   }
 
@@ -353,12 +353,12 @@ public final class BoundedLocalCacheTest {
       localCache.tryToDrainBuffers();
       done.set(true);
     };
-    localCache.evictionLock().lock();
+    localCache.evictionLock.lock();
     try {
       ConcurrentTestHarness.execute(task);
       Awaits.await().untilTrue(done);
     } finally {
-      localCache.evictionLock().unlock();
+      localCache.evictionLock.unlock();
     }
   }
 
@@ -388,7 +388,7 @@ public final class BoundedLocalCacheTest {
   }
 
   void checkDrainBlocks(BoundedLocalCache<Integer, Integer> localCache, Runnable task) {
-    NonReentrantLock lock = localCache.evictionLock();
+    NonReentrantLock lock = localCache.evictionLock;
     AtomicBoolean done = new AtomicBoolean();
     lock.lock();
     try {

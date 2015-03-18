@@ -60,6 +60,7 @@ import javax.annotation.Nullable;
 import javax.annotation.concurrent.GuardedBy;
 import javax.annotation.concurrent.ThreadSafe;
 
+import com.github.benmanes.caffeine.base.UnsafeAccess;
 import com.github.benmanes.caffeine.cache.References.InternalReference;
 import com.github.benmanes.caffeine.cache.stats.DisabledStatsCounter;
 import com.github.benmanes.caffeine.cache.stats.StatsCounter;
@@ -140,6 +141,9 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
   /** The maximum number of write operations to perform per amortized drain. */
   static final int WRITE_BUFFER_DRAIN_THRESHOLD = 16;
 
+  static final long DRAIN_STATUS_OFFSET = UnsafeAccess.objectFieldOffset(
+      BoundedLocalCache.class, "drainStatus");
+
   static int ceilingNextPowerOfTwo(int x) {
     // From Hacker's Delight, Chapter 3, Harry S. Warren Jr.
     return 1 << (Integer.SIZE - Integer.numberOfLeadingZeros(x - 1));
@@ -156,45 +160,25 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
   // The tracer id
   final long id;
 
+  // The page replacement guards
+  volatile DrainStatus drainStatus;
+  final NonReentrantLock evictionLock;
+
   transient Set<K> keySet;
   transient Collection<V> values;
   transient Set<Entry<K, V>> entrySet;
 
-  // Remaining fields pending migration to codegen
-  @GuardedBy("evictionLock")
-  private final long[] readBufferReadCount;
-  private final AtomicLong[] readBufferWriteCount;
-  private final AtomicLong[] readBufferDrainAtWriteCount;
-  private final AtomicReference<Node<K, V>>[][] readBuffers;
-
-  private final NonReentrantLock evictionLock;
-  private final AtomicReference<DrainStatus> drainStatus;
-
   /** Creates an instance based on the builder's configuration. */
-  @SuppressWarnings({"unchecked", "cast"})
   protected BoundedLocalCache(Caffeine<K, V> builder,
       @Nullable CacheLoader<? super K, V> loader, boolean isAsync) {
+    lazySetDrainStatus(IDLE);
+    evictionLock = new NonReentrantLock();
     id = tracer().register(builder.name());
     data = new ConcurrentHashMap<>(builder.getInitialCapacity());
     nodeFactory = NodeFactory.getFactory(builder.isStrongKeys(), builder.isWeakKeys(),
         builder.isStrongValues(), builder.isWeakValues(), builder.isSoftValues(),
         builder.expiresAfterAccess(), builder.expiresAfterWrite(), builder.refreshes(),
         builder.evicts(), (isAsync && builder.evicts()) || builder.isWeighted());
-
-    readBufferReadCount = new long[NUMBER_OF_READ_BUFFERS];
-    readBufferWriteCount = new AtomicLong[NUMBER_OF_READ_BUFFERS];
-    readBufferDrainAtWriteCount = new AtomicLong[NUMBER_OF_READ_BUFFERS];
-    readBuffers = new AtomicReference[NUMBER_OF_READ_BUFFERS][READ_BUFFER_SIZE];
-    for (int i = 0; i < NUMBER_OF_READ_BUFFERS; i++) {
-      readBufferWriteCount[i] = new AtomicLong();
-      readBufferDrainAtWriteCount[i] = new AtomicLong();
-      readBuffers[i] = new AtomicReference[READ_BUFFER_SIZE];
-      for (int j = 0; j < READ_BUFFER_SIZE; j++) {
-        readBuffers[i][j] = new AtomicReference<Node<K, V>>();
-      }
-    }
-    evictionLock = new NonReentrantLock();
-    drainStatus = new AtomicReference<DrainStatus>(IDLE);
   }
 
   @GuardedBy("evictionLock")
@@ -357,13 +341,13 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
    */
   void setMaximum(long maximum) {
     Caffeine.requireArgument(maximum >= 0);
-    evictionLock().lock();
+    evictionLock.lock();
     try {
       lazySetMaximum(Math.min(maximum, MAXIMUM_CAPACITY));
       drainBuffers();
       evict();
     } finally {
-      evictionLock().unlock();
+      evictionLock.unlock();
     }
   }
 
@@ -383,35 +367,32 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
   }
 
   DrainStatus drainStatus() {
-    return drainStatus.get();
+    return (DrainStatus) UnsafeAccess.UNSAFE.getObject(this, DRAIN_STATUS_OFFSET);
   }
 
   void lazySetDrainStatus(DrainStatus drainStatus) {
-    this.drainStatus.lazySet(drainStatus);
+    UnsafeAccess.UNSAFE.putOrderedObject(this, DRAIN_STATUS_OFFSET, IDLE);
   }
 
   void compareAndSetDrainStatus(DrainStatus expect, DrainStatus update) {
-    drainStatus.compareAndSet(expect, update);
+    UnsafeAccess.UNSAFE.compareAndSwapObject(this, DRAIN_STATUS_OFFSET, expect, update);
   }
 
-  NonReentrantLock evictionLock() {
-    return evictionLock;
+  @GuardedBy("evictionLock")
+  protected long[] readBufferReadCount() {
+    throw new UnsupportedOperationException();
   }
 
-  long[] readBufferReadCount() {
-    return readBufferReadCount;
+  protected AtomicLong[] readBufferWriteCount() {
+    throw new UnsupportedOperationException();
   }
 
-  AtomicLong[] readBufferWriteCount() {
-    return readBufferWriteCount;
+  protected AtomicLong[] readBufferDrainAtWriteCount() {
+    throw new UnsupportedOperationException();
   }
 
-  AtomicLong[] readBufferDrainAtWriteCount() {
-    return readBufferDrainAtWriteCount;
-  }
-
-  AtomicReference<Node<K, V>>[][] readBuffers() {
-    return readBuffers;
+  protected AtomicReference<Node<K, V>>[][] readBuffers() {
+    throw new UnsupportedOperationException();
   }
 
   /** Determines whether the map has exceeded its capacity. */
@@ -582,8 +563,7 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
    * @param writeCount the number of writes on the chosen read buffer
    */
   void drainOnReadIfNeeded(int bufferIndex, long writeCount) {
-    final long pending =
-        (writeCount - readBufferDrainAtWriteCount()[bufferIndex].get());
+    final long pending = (writeCount - readBufferDrainAtWriteCount()[bufferIndex].get());
     final boolean delayable = (pending < READ_BUFFER_THRESHOLD);
     final DrainStatus status = drainStatus();
     if (status.shouldDrainBuffers(delayable)) {
@@ -615,13 +595,13 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
    * threshold, to the page replacement policy.
    */
   void tryToDrainBuffers() {
-    if (evictionLock().tryLock()) {
+    if (evictionLock.tryLock()) {
       try {
         lazySetDrainStatus(PROCESSING);
         drainBuffers();
       } finally {
         compareAndSetDrainStatus(PROCESSING, IDLE);
-        evictionLock().unlock();
+        evictionLock.unlock();
       }
     }
   }
@@ -848,7 +828,7 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
 
   @Override
   public void clear() {
-    evictionLock().lock();
+    evictionLock.lock();
     try {
       // Apply all pending writes
       Runnable task;
@@ -913,7 +893,7 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
         makeDead(node);
       }
     } finally {
-      evictionLock().unlock();
+      evictionLock.unlock();
     }
   }
 
@@ -1368,11 +1348,11 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
 
   @Override
   public void cleanUp() {
-    evictionLock().lock();
+    evictionLock.lock();
     try {
       drainBuffers();
     } finally {
-      evictionLock().unlock();
+      evictionLock.unlock();
     }
   }
 
@@ -1401,7 +1381,7 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
   Map<K, V> orderedMap(LinkedDeque<Node<K, V>> deque, Function<V, V> transformer,
       boolean ascending, int limit) {
     Caffeine.requireArgument(limit >= 0);
-    evictionLock().lock();
+    evictionLock.lock();
     try {
       drainBuffers();
 
@@ -1422,7 +1402,7 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
       }
       return unmodifiableMap(map);
     } finally {
-      evictionLock().unlock();
+      evictionLock.unlock();
     }
   }
 
