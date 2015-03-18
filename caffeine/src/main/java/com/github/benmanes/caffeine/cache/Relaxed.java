@@ -42,6 +42,11 @@ final class Relaxed {
     public final void lazySet(long newValue) {
       UnsafeAccess.UNSAFE.putOrderedLong(this, VALUE_OFFSET, newValue);
     }
+
+    @Override
+    public String toString() {
+      return Long.toString(lazyGet());
+    }
   }
 
   /** A variant of AtomicReference supporting only relaxed read and write operations. */
@@ -66,6 +71,11 @@ final class Relaxed {
     /** Returns {@code true} if the value was swapped from the expected to the updated. */
     public boolean compareAndSet(V expect, V update) {
       return UnsafeAccess.UNSAFE.compareAndSwapObject(this, VALUE_OFFSET, expect, update);
+    }
+
+    @Override
+    public String toString() {
+      return String.valueOf(lazyGet());
     }
   }
 }

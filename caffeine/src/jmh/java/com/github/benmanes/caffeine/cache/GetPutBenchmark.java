@@ -38,11 +38,11 @@ public class GetPutBenchmark {
   private static final int MASK = SIZE - 1;
 
   @Param({
-    "LinkedHashMap_Lru",
+//    "LinkedHashMap_Lru",
 //    "ConcurrentHashMap",
     "ConcurrentLinkedHashMap",
     "Caffeine",
-    "Guava",
+//    "Guava",
   })
   CacheType cacheType;
 
@@ -73,18 +73,18 @@ public class GetPutBenchmark {
     cache.get(ints[threadState.index++ & MASK]);
   }
 
-  @Benchmark @Group("write_only") @GroupThreads(8)
-  public void writeOnly(ThreadState threadState) {
-    cache.put(ints[threadState.index++ & MASK], Boolean.FALSE);
-  }
-
-  @Benchmark @Group("readwrite") @GroupThreads(6)
-  public void readwrite_get(ThreadState threadState) {
-    cache.get(ints[threadState.index++ & MASK]);
-  }
-
-  @Benchmark @Group("readwrite") @GroupThreads(2)
-  public void readwrite_put(ThreadState threadState) {
-    cache.put(ints[threadState.index++ & MASK], Boolean.FALSE);
-  }
+//  @Benchmark @Group("write_only") @GroupThreads(8)
+//  public void writeOnly(ThreadState threadState) {
+//    cache.put(ints[threadState.index++ & MASK], Boolean.FALSE);
+//  }
+//
+//  @Benchmark @Group("readwrite") @GroupThreads(6)
+//  public void readwrite_get(ThreadState threadState) {
+//    cache.get(ints[threadState.index++ & MASK]);
+//  }
+//
+//  @Benchmark @Group("readwrite") @GroupThreads(2)
+//  public void readwrite_put(ThreadState threadState) {
+//    cache.put(ints[threadState.index++ & MASK], Boolean.FALSE);
+//  }
 }

@@ -387,7 +387,6 @@ public final class LocalCacheGenerator {
     addReadBuffersField();
     addReadBufferWriteCount();
     addReadBufferReadCountField();
-    addReadBufferDrainAtWriteCountField();
     initializeReadBufferArrays();
   }
 
@@ -418,23 +417,12 @@ public final class LocalCacheGenerator {
   }
 
   private void addReadBufferReadCountField() {
-    constructor.addStatement("this.readBufferReadCount = new long[NUMBER_OF_READ_BUFFERS]");
-    cache.addField(FieldSpec.builder(long[].class,
+    constructor.addStatement(
+        "this.readBufferReadCount = new $T[NUMBER_OF_READ_BUFFERS]", RELAXED_LONG);
+    cache.addField(FieldSpec.builder(ArrayTypeName.of(RELAXED_LONG),
         "readBufferReadCount", privateFinalModifiers).build());
     cache.addMethod(MethodSpec.methodBuilder("readBufferReadCount")
         .addStatement("return readBufferReadCount")
-        .addModifiers(protectedFinalModifiers)
-        .returns(long[].class)
-        .build());
-  }
-
-  private void addReadBufferDrainAtWriteCountField() {
-    constructor.addStatement(
-        "this.readBufferDrainAtWriteCount = new $T[NUMBER_OF_READ_BUFFERS]", RELAXED_LONG);
-    cache.addField(FieldSpec.builder(ArrayTypeName.of(RELAXED_LONG),
-        "readBufferDrainAtWriteCount", privateFinalModifiers).build());
-    cache.addMethod(MethodSpec.methodBuilder("readBufferDrainAtWriteCount")
-        .addStatement("return readBufferDrainAtWriteCount")
         .returns(ArrayTypeName.of(RELAXED_LONG))
         .addModifiers(protectedFinalModifiers)
         .build());
@@ -443,8 +431,8 @@ public final class LocalCacheGenerator {
   private void initializeReadBufferArrays() {
     constructor.addCode(CodeBlock.builder()
         .beginControlFlow("for (int i = 0; i < NUMBER_OF_READ_BUFFERS; i++)")
+            .addStatement("readBufferReadCount[i] = new $T()", RELAXED_LONG)
             .addStatement("readBufferWriteCount[i] = new $T()", RELAXED_LONG)
-            .addStatement("readBufferDrainAtWriteCount[i] = new $T()", RELAXED_LONG)
             .addStatement("readBuffers[i] = new $T[READ_BUFFER_SIZE]", RELAXED_REF)
             .beginControlFlow("for (int j = 0; j < READ_BUFFER_SIZE; j++)")
                 .addStatement("readBuffers[i][j] = new $T<$T>()", RELAXED_REF, NODE)

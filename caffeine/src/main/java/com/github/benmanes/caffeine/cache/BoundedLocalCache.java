@@ -93,11 +93,11 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
    * the amortized cost is slightly higher than performing just the ConcurrentHashMap operation.
    *
    * A memento of the reads and writes that were performed on the map are recorded in buffers. These
-   * buffers are drained at the first opportunity after a write or when the read buffer exceeds a
-   * threshold size. The reads are recorded in a lossy buffer, allowing the reordering operations to
-   * be discarded if the draining process cannot keep up. Due to the concurrent nature of the read
-   * and write operations a strict policy ordering is not possible, but is observably strict when
-   * single threaded.
+   * buffers are drained at the first opportunity after a write or when a read buffer exceeds the
+   * threshold size. The reads are offered in a buffer that will reject additions if contented on
+   * or is full due to the draining process unable to keep up. Due to the concurrent nature of the
+   * read and write operations a strict policy ordering is not possible, but is observably strict
+   * when single threaded.
    *
    * Due to a lack of a strict ordering guarantee, a task can be executed out-of-order, such as a
    * removal followed by its addition. The state of the entry is encoded using the key field to
@@ -378,16 +378,12 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
     UnsafeAccess.UNSAFE.compareAndSwapObject(this, DRAIN_STATUS_OFFSET, expect, update);
   }
 
-  @GuardedBy("evictionLock")
-  protected long[] readBufferReadCount() {
+  @GuardedBy("evictionLock") // must write under lock
+  protected RelaxedLong[] readBufferReadCount() {
     throw new UnsupportedOperationException();
   }
 
   protected RelaxedLong[] readBufferWriteCount() {
-    throw new UnsupportedOperationException();
-  }
-
-  protected RelaxedLong[] readBufferDrainAtWriteCount() {
     throw new UnsupportedOperationException();
   }
 
@@ -543,16 +539,14 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
    * @return the number of writes on the chosen read buffer
    */
   long recordRead(int bufferIndex, Node<K, V> node) {
-    // The location in the buffer is chosen in a racy fashion as the increment is not atomic with
-    // the insertion. This means that concurrent reads can overlap and overwrite one another,
-    // resulting in a lossy buffer.
     final RelaxedLong counter = readBufferWriteCount()[bufferIndex];
-    final long writeCount = counter.lazyGet();
-    counter.lazySet(writeCount + 1);
-
+    long writeCount = counter.lazyGet();
     final int index = (int) (writeCount & READ_BUFFER_INDEX_MASK);
-    readBuffers()[bufferIndex][index].lazySet(node);
-
+    final RelaxedReference<Node<K, V>> buffer = readBuffers()[bufferIndex][index];
+    if ((buffer.lazyGet() == null) && buffer.compareAndSet(null, node)) {
+      writeCount++;
+      counter.lazySet(writeCount);
+    }
     return writeCount;
   }
 
@@ -563,8 +557,8 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
    * @param writeCount the number of writes on the chosen read buffer
    */
   void drainOnReadIfNeeded(int bufferIndex, long writeCount) {
-    final long pending = (writeCount - readBufferDrainAtWriteCount()[bufferIndex].lazyGet());
-    final boolean delayable = (pending < READ_BUFFER_THRESHOLD);
+    final long pending = (writeCount - readBufferReadCount()[bufferIndex].lazyGet());
+    final boolean delayable = (pending <= READ_BUFFER_THRESHOLD);
     final DrainStatus status = drainStatus();
     if (status.shouldDrainBuffers(delayable)) {
       tryToDrainBuffers();
@@ -663,20 +657,21 @@ abstract class BoundedLocalCache<K, V> extends AbstractMap<K, V> implements Loca
   /** Drains the read buffer up to an amortized threshold. */
   @GuardedBy("evictionLock")
   void drainReadBuffer(int bufferIndex) {
-    final long writeCount = readBufferWriteCount()[bufferIndex].lazyGet();
+    RelaxedReference<Node<K, V>>[] readBuffer = readBuffers()[bufferIndex];
+    RelaxedLong readCount = readBufferReadCount()[bufferIndex];
+    long read = readCount.lazyGet();
     for (int i = 0; i < READ_BUFFER_DRAIN_THRESHOLD; i++) {
-      final int index = (int) (readBufferReadCount()[bufferIndex] & READ_BUFFER_INDEX_MASK);
-      final RelaxedReference<Node<K, V>> slot = readBuffers()[bufferIndex][index];
+      final int index = (int) (read & READ_BUFFER_INDEX_MASK);
+      final RelaxedReference<Node<K, V>> slot = readBuffer[index];
       final Node<K, V> node = slot.lazyGet();
       if (node == null) {
         break;
       }
-
+      read++;
       slot.lazySet(null);
       reorder(accessOrderDeque(), node);
-      readBufferReadCount()[bufferIndex]++;
     }
-    readBufferDrainAtWriteCount()[bufferIndex].lazySet(writeCount);
+    readCount.lazySet(read);
   }
 
   /** Updates the node's location in the page replacement policy. */

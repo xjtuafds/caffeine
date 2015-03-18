@@ -30,6 +30,7 @@ import org.hamcrest.Description;
 import org.hamcrest.Factory;
 import org.hamcrest.TypeSafeDiagnosingMatcher;
 
+import com.github.benmanes.caffeine.cache.Relaxed.RelaxedLong;
 import com.github.benmanes.caffeine.matchers.DescriptionBuilder;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
@@ -81,7 +82,8 @@ public final class IsValidBoundedLocalCache<K, V>
         if (fullyDrained) {
           break;
         }
-        cache.readBufferReadCount()[i]++;
+        RelaxedLong readCount = cache.readBufferReadCount()[i];
+        readCount.lazySet(readCount.lazyGet() + 1);
       }
     }
     cache.evictionLock.unlock();

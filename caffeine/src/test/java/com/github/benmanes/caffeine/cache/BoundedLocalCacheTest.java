@@ -15,6 +15,9 @@
  */
 package com.github.benmanes.caffeine.cache;
 
+import static com.github.benmanes.caffeine.cache.BoundedLocalCache.READ_BUFFER_DRAIN_THRESHOLD;
+import static com.github.benmanes.caffeine.cache.BoundedLocalCache.READ_BUFFER_SIZE;
+import static com.github.benmanes.caffeine.cache.BoundedLocalCache.READ_BUFFER_THRESHOLD;
 import static com.github.benmanes.caffeine.cache.testing.HasRemovalNotifications.hasRemovalNotifications;
 import static com.github.benmanes.caffeine.cache.testing.HasStats.hasEvictionCount;
 import static java.util.Arrays.asList;
@@ -207,7 +210,7 @@ public final class BoundedLocalCacheTest {
   public void updateRecency_onGetQuietly(Cache<Integer, Integer> cache) {
     BoundedLocalCache<Integer, Integer> localCache = asBoundedLocalCache(cache);
     int index = BoundedLocalCache.readBufferIndex();
-    RelaxedLong drainCounter = localCache.readBufferDrainAtWriteCount()[index];
+    RelaxedLong drainCounter = localCache.readBufferReadCount()[index];
 
     Node<Integer, Integer> first = localCache.accessOrderDeque().peek();
     Node<Integer, Integer> last = localCache.accessOrderDeque().peekLast();
@@ -277,15 +280,15 @@ public final class BoundedLocalCacheTest {
     Node<Integer, Integer> dummy = localCache.nodeFactory.newNode(null, null, null, 1, 0);
 
     int index = BoundedLocalCache.readBufferIndex();
-    RelaxedLong drainCounter = localCache.readBufferDrainAtWriteCount()[index];
-    localCache.readBufferWriteCount()[index].lazySet(
-        BoundedLocalCache.READ_BUFFER_THRESHOLD - 1);
-
-    localCache.afterRead(dummy, true);
+    for (int i = 0; i < 2 * READ_BUFFER_SIZE; i++) {
+      localCache.recordRead(index, dummy);
+    }
+    assertThat(localCache.recordRead(index, dummy), is((long) READ_BUFFER_SIZE));
+    RelaxedLong drainCounter = localCache.readBufferReadCount()[index];
     assertThat(drainCounter.lazyGet(), is(0L));
 
     localCache.afterRead(dummy, true);
-    assertThat(drainCounter.lazyGet(), is(BoundedLocalCache.READ_BUFFER_THRESHOLD + 1L));
+    assertThat(drainCounter.lazyGet(), is((long) READ_BUFFER_DRAIN_THRESHOLD));
   }
 
   @Test(dataProvider = "caches")
@@ -312,7 +315,7 @@ public final class BoundedLocalCacheTest {
     RelaxedReference<Node<Integer, Integer>>[] buffer = localCache.readBuffers()[index];
     RelaxedLong writeCounter = localCache.readBufferWriteCount()[index];
 
-    for (int i = 0; i < BoundedLocalCache.READ_BUFFER_THRESHOLD; i++) {
+    for (int i = 0; i < READ_BUFFER_THRESHOLD; i++) {
       localCache.get(context.firstKey());
     }
 
@@ -322,11 +325,11 @@ public final class BoundedLocalCacheTest {
         pending++;
       }
     }
-    assertThat(pending, is(equalTo(BoundedLocalCache.READ_BUFFER_THRESHOLD)));
+    assertThat(pending, is(equalTo(READ_BUFFER_THRESHOLD)));
     assertThat((int) writeCounter.lazyGet(), is(equalTo(pending)));
 
     localCache.get(context.firstKey());
-    assertThat(localCache.readBufferReadCount()[index], is(equalTo(writeCounter.lazyGet())));
+    assertThat(localCache.readBufferReadCount()[index].lazyGet(), is(writeCounter.lazyGet()));
     for (int i = 0; i < localCache.readBuffers().length; i++) {
       assertThat(localCache.readBuffers()[index][i].lazyGet(), is(nullValue()));
     }
